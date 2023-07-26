@@ -3,7 +3,6 @@ package kafkaconsumer
 import (
 	"context"
 	"errors"
-	"fmt"
 	"github.com/rs/zerolog/log"
 	"github.com/segmentio/kafka-go"
 	"strings"
@@ -15,7 +14,7 @@ var (
 )
 
 type Consumer struct {
-	errCh  chan error
+	// errCh  chan error
 	reader *kafka.Reader
 }
 
@@ -42,6 +41,56 @@ func NewConsumer(brokerUrls, topic string, opts ...Option) *Consumer {
 
 	return &c
 }
+
+
+func (c *Consumer) Listen(ctx context.Context) error { // Use context passed from outside
+
+	for {
+		select {
+		case <-ctx.Done():
+			log.Info().Msg("Context done...")
+			c.Close()
+			return nil
+		default:
+			log.Info().Msg("Listening...")
+			m, err := c.reader.ReadMessage(ctx)
+			if err != nil {
+				if errors.Is(err, context.Canceled) {
+					// Context was canceled, this is not considered an error in our case.
+					log.Info().Msg("Context was canceled, stopping the loop...")
+					c.Close()
+					return nil
+				}
+				// It's another kind of error.
+				log.Error().Err(err).Msg("Error on reading message")
+				return err
+			}
+
+			timestamp := m.Time.UTC().Format(time.RFC3339)
+			log.Info().Msgf("message at offset %d: %s\n", m.Offset, timestamp)
+			log.Info().Msgf("message at offset %d: %s = %s\n", m.Offset,
+				string(m.Key), string(m.Value))
+		}
+	}
+
+}
+
+func (c *Consumer) Close() error {
+
+	log.Info().Msg("Closing reader...")
+	err := c.reader.Close()
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to close reader")
+		return err
+	}
+	log.Info().Msg("Closing reader...done")
+	return nil
+}
+
+// func (c *Consumer) Error() chan error {
+// 	return c.errCh
+// }
+
 
 //* TODO LISTEN GA DI BREAK
 
@@ -70,46 +119,3 @@ func NewConsumer(brokerUrls, topic string, opts ...Option) *Consumer {
 
 // 	return nil
 // }
-
-func (c *Consumer) Listen() error { // Use context passed from outside
-	ctx := context.Background()
-
-	for {
-		log.Info().Msg("Listening...")
-		m, err := c.reader.ReadMessage(ctx)
-		if err != nil {
-			fmt.Println(err, "ERROR GAN")
-			if errors.Is(err, context.Canceled) {
-				// Context was canceled, this is not considered an error in our case.
-				log.Info().Msg("Context was canceled, stopping the loop...")
-				c.reader.Close()
-				return nil
-			}
-
-			// It's another kind of error.
-			log.Error().Err(err).Msg("Error on reading message")
-			//c.errCh <- err
-			return nil
-		}
-
-		timestamp := m.Time.UTC().Format(time.RFC3339)
-		log.Info().Msgf("message at offset %d: %s\n", m.Offset, timestamp)
-		log.Info().Msgf("message at offset %d: %s = %s\n", m.Offset,
-			string(m.Key), string(m.Value))
-	}
-
-}
-
-func (c *Consumer) Close() error {
-	
-	log.Info().Msg("Closing reader...")
-	err := c.reader.Close()
-	if err != nil {
-		log.Error().Err(err).Msg("Failed to close reader")
-	}
-	return nil
-}
-
-func (c *Consumer) Error() chan error {
-	return c.errCh
-}

@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
-
+"sync"
 	"github.com/go-chi/chi/v5"
 	"github.com/kubuskotak/asgard/common"
 	pkgInf "github.com/kubuskotak/asgard/infrastructure"
@@ -127,6 +127,7 @@ func (r *rootOptions) runServer(_ *cobra.Command, _ []string) error {
 	// end http
 
 	
+
 	/**
 	* Initialize Kafka Consumer
 	*/
@@ -137,17 +138,16 @@ func (r *rootOptions) runServer(_ *cobra.Command, _ []string) error {
 		kafkaconsumer.WithGroupID(infrastructure.Envs.ConsumerHello.GroupID),
 	)
 
+	var wg sync.WaitGroup
+	wg.Add(1)
 	go func(){
-		err := consumerHello.Listen();
+		defer wg.Done()
+		err := consumerHello.Listen(ctx);
 		if err != nil {
-			fmt.Println(err, ">>>>>>>>ERR")
-			return 
+			log.Error().Err(err).Msg("Error in Listen") 
 		}
+		log.Info().Msg("Closing Listen...")
 	}()
-
-
-	//errCh = consumerHello.Error()
-	// end kafka consumer
 
 
 	stopCh := signal.SetupSignalHandler()
@@ -162,21 +162,24 @@ func (r *rootOptions) runServer(_ *cobra.Command, _ []string) error {
 				log.Error().Err(err).Msg("metric provider server is failed shutdown")
 			}
 		}
-		
+	
 		// rest
 		if err := h.Quite(context.Background()); err != nil {
 			log.Error().Err(err).Msg("http server is failed shutdown")
 		}
 		h.Stop()
-
-		fmt.Println("CCCCCCCC")
-
-		fmt.Println("AAAAAAAAAA")
 		// adapters
 		if err := adaptor.UnSync(); err != nil {
 			log.Error().Err(err).Msg("there is failed on UnSync adapter")
 		}
+
+		cancel() // cancel context
+
+		wg.Wait() // wait Closing reader...
+
 	}) // graceful shutdown
+
+	
 }
 
 // Execute is the execute command for root command.
