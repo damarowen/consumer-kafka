@@ -14,13 +14,12 @@ var (
 )
 
 type Consumer struct {
-	// errCh  chan error
 	reader *kafka.Reader
+	errors   chan error
 }
 
 func NewConsumer(brokerUrls, topic string, opts ...Option) *Consumer {
 	c := Consumer{}
-	//c.errCh = make(chan error)
 
 	config := kafka.ReaderConfig{
 		Brokers:  strings.Split(brokerUrls, ","),
@@ -38,19 +37,20 @@ func NewConsumer(brokerUrls, topic string, opts ...Option) *Consumer {
 	}
 
 	c.reader = kafka.NewReader(config)
+	c.errors = make(chan error,1)
 
 	return &c
 }
 
 
-func (c *Consumer) Listen(ctx context.Context) error { // Use context passed from outside
+func (c *Consumer) Listen(ctx context.Context) { // Use context passed from outside
+    defer c.Close()
 
 	for {
 		select {
 		case <-ctx.Done():
 			log.Info().Msg("Context done...")
-			c.Close()
-			return nil
+			return 
 		default:
 			log.Info().Msg("Listening...")
 			m, err := c.reader.ReadMessage(ctx)
@@ -58,12 +58,12 @@ func (c *Consumer) Listen(ctx context.Context) error { // Use context passed fro
 				if errors.Is(err, context.Canceled) {
 					// Context was canceled, this is not considered an error in our case.
 					log.Info().Msg("Context was canceled, stopping the loop...")
-					c.Close()
-					return nil
+					return 
 				}
 				// It's another kind of error.
 				log.Error().Err(err).Msg("Error on reading message")
-				return err
+				c.errors <- err
+				continue 
 			}
 
 			timestamp := m.Time.UTC().Format(time.RFC3339)
@@ -75,47 +75,13 @@ func (c *Consumer) Listen(ctx context.Context) error { // Use context passed fro
 
 }
 
-func (c *Consumer) Close() error {
-
-	log.Info().Msg("Closing reader...")
-	err := c.reader.Close()
-	if err != nil {
-		log.Error().Err(err).Msg("Failed to close reader")
-		return err
-	}
-	log.Info().Msg("Closing reader...done")
-	return nil
+func (c *Consumer) Errors() chan error {
+    return c.errors
 }
 
-// func (c *Consumer) Error() chan error {
-// 	return c.errCh
-// }
-
-
-//* TODO LISTEN GA DI BREAK
-
-// func (c *Consumer) Listen() error {
-// 	ctx := context.Background()
-
-// 	// while loop so always listen to channel
-// 	// function needs to continuously consume messages until the context is cancelled or an error occurs,
-// 	go func() {
-// 		for {
-
-// 			fmt.Println("LISTENING")
-// 			m, err := c.reader.ReadMessage(ctx)
-// 			if err != nil {
-// 				fmt.Println(err, "ERROR GAN")
-// 				c.errCh <- err
-// 				return
-// 			}
-
-// 			timestamp := m.Time.UTC().Format(time.RFC3339)
-
-// 			log.Info().Msgf("message at offset %d: %s\n", m.Offset, timestamp)
-// 			log.Info().Msgf("message at offset %d: %s = %s\n", m.Offset, string(m.Key), string(m.Value))
-// 		}
-// 	}()
-
-// 	return nil
-// }
+func (c *Consumer) Close() {
+	log.Info().Msg("Closing reader...")
+	c.reader.Close()
+	log.Info().Msg("Closing reader...done")
+	return 
+}

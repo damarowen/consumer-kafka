@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
-"sync"
+
 	"github.com/go-chi/chi/v5"
 	"github.com/kubuskotak/asgard/common"
 	pkgInf "github.com/kubuskotak/asgard/infrastructure"
@@ -138,16 +138,11 @@ func (r *rootOptions) runServer(_ *cobra.Command, _ []string) error {
 		kafkaconsumer.WithGroupID(infrastructure.Envs.ConsumerHello.GroupID),
 	)
 
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func(){
-		defer wg.Done()
-		err := consumerHello.Listen(ctx);
-		if err != nil {
-			log.Error().Err(err).Msg("Error in Listen") 
-		}
-		log.Info().Msg("Closing Listen...")
-	}()
+
+	go consumerHello.Listen(ctx);
+
+
+	errCh = consumerHello.Errors()
 
 
 	stopCh := signal.SetupSignalHandler()
@@ -172,10 +167,8 @@ func (r *rootOptions) runServer(_ *cobra.Command, _ []string) error {
 		if err := adaptor.UnSync(); err != nil {
 			log.Error().Err(err).Msg("there is failed on UnSync adapter")
 		}
-
 		cancel() // cancel context
-
-		wg.Wait() // wait Closing reader...
+	
 
 	}) // graceful shutdown
 
